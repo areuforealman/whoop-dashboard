@@ -1,0 +1,8 @@
+.env
+.whoop_token.json
+.gcal_token.json
+credentials.json
+whoop.db
+__pycache__/
+*.pyc
+.DS_Store
