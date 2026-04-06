@@ -394,14 +394,16 @@
   async function triggerSync(btn) {
     btn.textContent = "Syncing...";
     btn.disabled = true;
-    const res = await fetch("/sync", { method: "POST" });
-    if (res.ok) {
-      location.reload();
-    } else {
-      btn.textContent = "↻ Sync now";
-      btn.disabled = false;
-      alert("Sync failed — check terminal for errors.");
-    }
+    await fetch("/sync", { method: "POST" });
+    // Poll until sync finishes
+    const poll = setInterval(async () => {
+      const res = await fetch("/sync/status");
+      const data = await res.json();
+      if (!data.running) {
+        clearInterval(poll);
+        location.reload();
+      }
+    }, 2000);
   }
 </script>
 </body>

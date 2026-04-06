@@ -1,3 +1,4 @@
+import threading
 from datetime import date, datetime
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -6,6 +7,8 @@ import os
 
 from api.calendar import fetch_today_events
 from db.database import get_conn, get_sync_state
+
+_sync_status = {"running": False, "message": "Not synced yet"}
 
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 router = APIRouter()
@@ -61,12 +64,8 @@ async def auth_callback(code: str, state: str = ""):
     token["expires_at"] = time.time() + token["expires_in"] - 60
     with open(WHOOP_TOKEN_FILE, "w") as f:
         json.dump(token, f)
-    # Kick off initial sync in background
-    from sync.sync import run_sync
-    try:
-        run_sync()
-    except Exception as e:
-        print(f"Initial sync error: {e}")
+    # Kick off initial sync in background thread — don't block the redirect
+    _start_sync_thread()
     return RedirectResponse("/")
 
 
@@ -140,11 +139,32 @@ async def log_mood(energy_level: int = Form(...), note: str = Form("")):
     return {"status": "ok"}
 
 
+def _start_sync_thread():
+    if _sync_status["running"]:
+        return
+    def _run():
+        from sync.sync import run_sync
+        _sync_status["running"] = True
+        _sync_status["message"] = "Syncing..."
+        try:
+            run_sync()
+            _sync_status["message"] = "Sync complete"
+        except Exception as e:
+            _sync_status["message"] = f"Sync error: {e}"
+            print(f"Sync error: {e}")
+        finally:
+            _sync_status["running"] = False
+    threading.Thread(target=_run, daemon=True).start()
+
+
 @router.post("/sync", response_class=JSONResponse)
 async def trigger_sync():
-    from sync.sync import run_sync
-    try:
-        run_sync()
-        return {"status": "ok"}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    if _sync_status["running"]:
+        return {"status": "running", "message": "Sync already in progress"}
+    _start_sync_thread()
+    return {"status": "started"}
+
+
+@router.get("/sync/status", response_class=JSONResponse)
+async def sync_status():
+    return _sync_status
