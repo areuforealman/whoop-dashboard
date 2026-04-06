@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from typing import Optional
 from config import DB_PATH
 
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
@@ -18,7 +19,7 @@ def init_db():
         conn.executescript(schema)
 
 
-def get_sync_state(key: str) -> str | None:
+def get_sync_state(key: str) -> Optional[str]:
     with get_conn() as conn:
         row = conn.execute("SELECT value FROM sync_state WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None

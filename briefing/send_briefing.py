@@ -13,6 +13,7 @@ from datetime import date, datetime, timezone
 
 import requests
 from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()
 
@@ -27,7 +28,7 @@ def _query_one(sql: str, params=()) -> dict:
         return dict(row) if row else {}
 
 
-def _recovery_insight(recovery_score: int | None, yesterday_strain: float | None) -> str:
+def _recovery_insight(recovery_score: Optional[int], yesterday_strain: Optional[float]) -> str:
     if recovery_score is None:
         return "No recovery data yet — check Whoop app."
     if yesterday_strain and yesterday_strain > 18 and recovery_score < 50:
@@ -39,7 +40,7 @@ def _recovery_insight(recovery_score: int | None, yesterday_strain: float | None
     return "Low recovery — rest or light activity only."
 
 
-def _format_sleep(total_ms: int | None, efficiency: float | None) -> str:
+def _format_sleep(total_ms: Optional[int], efficiency: Optional[float]) -> str:
     if not total_ms:
         return "—"
     h = int(total_ms / 3600000)

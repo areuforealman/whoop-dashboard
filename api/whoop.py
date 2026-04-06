@@ -1,42 +1,22 @@
 import json
 import os
-import secrets
 import time
-import webbrowser
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlencode, urlparse
+from typing import Optional
+from urllib.parse import urlencode
 
 import requests
 
 from config import (
     WHOOP_API_BASE,
-    WHOOP_AUTH_URL,
     WHOOP_CLIENT_ID,
     WHOOP_CLIENT_SECRET,
-    WHOOP_REDIRECT_URI,
-    WHOOP_SCOPES,
     WHOOP_TOKEN_FILE,
     WHOOP_TOKEN_URL,
 )
 
-_auth_code = None
 
-
-class _CallbackHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        global _auth_code
-        params = parse_qs(urlparse(self.path).query)
-        _auth_code = params.get("code", [None])[0]
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"<h2>Authenticated! You can close this tab.</h2>")
-
-    def log_message(self, *args):
-        pass
-
-
-def _load_token() -> dict | None:
+def _load_token() -> Optional[dict]:
     if os.path.exists(WHOOP_TOKEN_FILE):
         with open(WHOOP_TOKEN_FILE) as f:
             return json.load(f)
@@ -81,42 +61,7 @@ def _get_token() -> dict:
             token = _refresh_token(token)
         return token
 
-    # Interactive OAuth flow (local only)
-    global _auth_code
-    _auth_code = None
-    state = secrets.token_urlsafe(16)
-
-    auth_params = {
-        "client_id": WHOOP_CLIENT_ID,
-        "redirect_uri": WHOOP_REDIRECT_URI,
-        "response_type": "code",
-        "scope": WHOOP_SCOPES,
-        "state": state,
-    }
-    auth_url = f"{WHOOP_AUTH_URL}?{urlencode(auth_params)}"
-    print(f"\nOpening browser for Whoop authentication...\n{auth_url}\n")
-    webbrowser.open(auth_url)
-
-    server = HTTPServer(("localhost", 8000), _CallbackHandler)
-    while _auth_code is None:
-        server.handle_request()
-    server.server_close()
-
-    resp = requests.post(
-        WHOOP_TOKEN_URL,
-        data={
-            "grant_type": "authorization_code",
-            "code": _auth_code,
-            "redirect_uri": WHOOP_REDIRECT_URI,
-            "client_id": WHOOP_CLIENT_ID,
-            "client_secret": WHOOP_CLIENT_SECRET,
-        },
-    )
-    resp.raise_for_status()
-    token = resp.json()
-    token["expires_at"] = time.time() + token["expires_in"] - 60
-    _save_token(token)
-    return token
+    raise RuntimeError("No Whoop token found. Visit http://localhost:8000 to authenticate.")
 
 
 def _headers() -> dict:
@@ -124,15 +69,22 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {token['access_token']}"}
 
 
-def _paginate(path: str, params: dict | None = None) -> list:
-    """Fetch all pages from a Whoop paginated endpoint."""
+def _paginate(path: str, params: Optional[dict] = None) -> list:
+    """Fetch all pages from a Whoop paginated endpoint with retry on 429."""
     results = []
     url = f"{WHOOP_API_BASE}{path}"
     p = dict(params or {})
     p["limit"] = 25
     while url:
-        resp = requests.get(url, headers=_headers(), params=p)
-        resp.raise_for_status()
+        for attempt in range(5):
+            resp = requests.get(url, headers=_headers(), params=p)
+            if resp.status_code == 429:
+                wait = int(resp.headers.get("Retry-After", 2 ** (attempt + 1)))
+                print(f"Rate limited — waiting {wait}s before retry...")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            break
         data = resp.json()
         results.extend(data.get("records", []))
         next_token = data.get("next_token")
@@ -140,6 +92,7 @@ def _paginate(path: str, params: dict | None = None) -> list:
             p = {"next_token": next_token, "limit": 25}
         else:
             url = None
+        time.sleep(0.5)  # small delay between pages to avoid rate limits
     return results
 
 
@@ -150,7 +103,7 @@ def _date_param(days_ago: int) -> str:
 
 # --- Public fetch functions ---
 
-def fetch_cycles(start: str | None = None) -> list[dict]:
+def fetch_cycles(start: Optional[str] = None) -> list[dict]:
     params = {"start": start or _date_param(90)}
     raw = _paginate("/cycle", params)
     results = []
@@ -165,7 +118,7 @@ def fetch_cycles(start: str | None = None) -> list[dict]:
     return results
 
 
-def fetch_recoveries(start: str | None = None) -> list[dict]:
+def fetch_recoveries(start: Optional[str] = None) -> list[dict]:
     params = {"start": start or _date_param(90)}
     raw = _paginate("/recovery", params)
     results = []
@@ -183,7 +136,7 @@ def fetch_recoveries(start: str | None = None) -> list[dict]:
     return results
 
 
-def fetch_sleeps(start: str | None = None) -> list[dict]:
+def fetch_sleeps(start: Optional[str] = None) -> list[dict]:
     params = {"start": start or _date_param(90)}
     raw = _paginate("/activity/sleep", params)
     results = []
@@ -203,7 +156,7 @@ def fetch_sleeps(start: str | None = None) -> list[dict]:
     return results
 
 
-def fetch_workouts(start: str | None = None) -> list[dict]:
+def fetch_workouts(start: Optional[str] = None) -> list[dict]:
     params = {"start": start or _date_param(90)}
     raw = _paginate("/activity/workout", params)
     results = []

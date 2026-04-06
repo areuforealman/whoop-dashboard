@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 import os
 
@@ -10,39 +10,95 @@ from db.database import get_conn, get_sync_state
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 router = APIRouter()
 
+RECOVERY_DEFAULTS = {"score": None, "hrv_rmssd_milli": None, "resting_heart_rate": None}
+SLEEP_DEFAULTS = {"total_sleep_time_milli": None, "sleep_efficiency_percentage": None}
+CYCLE_DEFAULTS = {"strain_score": None}
 
-def _query(sql: str, params=()) -> list[dict]:
+
+def _query(sql: str, params=()) -> list:
     with get_conn() as conn:
         rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
 
+def _token_exists() -> bool:
+    from config import WHOOP_TOKEN_FILE
+    return os.path.exists(WHOOP_TOKEN_FILE)
+
+
+# --- Auth routes ---
+
+@router.get("/auth/start")
+async def auth_start():
+    from urllib.parse import urlencode
+    from config import WHOOP_AUTH_URL, WHOOP_CLIENT_ID, WHOOP_REDIRECT_URI, WHOOP_SCOPES
+    import secrets
+    state = secrets.token_urlsafe(16)
+    params = {
+        "client_id": WHOOP_CLIENT_ID,
+        "redirect_uri": WHOOP_REDIRECT_URI,
+        "response_type": "code",
+        "scope": WHOOP_SCOPES,
+        "state": state,
+    }
+    return RedirectResponse(f"{WHOOP_AUTH_URL}?{urlencode(params)}")
+
+
+@router.get("/auth/callback")
+async def auth_callback(code: str, state: str = ""):
+    import time, requests as req
+    from config import WHOOP_CLIENT_ID, WHOOP_CLIENT_SECRET, WHOOP_REDIRECT_URI, WHOOP_TOKEN_FILE, WHOOP_TOKEN_URL
+    import json
+    resp = req.post(WHOOP_TOKEN_URL, data={
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": WHOOP_REDIRECT_URI,
+        "client_id": WHOOP_CLIENT_ID,
+        "client_secret": WHOOP_CLIENT_SECRET,
+    })
+    resp.raise_for_status()
+    token = resp.json()
+    token["expires_at"] = time.time() + token["expires_in"] - 60
+    with open(WHOOP_TOKEN_FILE, "w") as f:
+        json.dump(token, f)
+    # Kick off initial sync in background
+    from sync.sync import run_sync
+    try:
+        run_sync()
+    except Exception as e:
+        print(f"Initial sync error: {e}")
+    return RedirectResponse("/")
+
+
+# --- Dashboard ---
+
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    # Today's metrics
+    # Redirect to auth if not connected
+    if not _token_exists():
+        return RedirectResponse("/auth/start")
+
     today = date.today().isoformat()
 
-    recovery = _query(
+    recovery_rows = _query(
         "SELECT * FROM recoveries WHERE date = ? ORDER BY rowid DESC LIMIT 1", (today,)
     )
-    recovery = recovery[0] if recovery else {}
+    recovery = {**RECOVERY_DEFAULTS, **(recovery_rows[0] if recovery_rows else {})}
 
-    sleep = _query(
+    sleep_rows = _query(
         "SELECT * FROM sleeps WHERE date = ? ORDER BY rowid DESC LIMIT 1", (today,)
     )
-    # Fall back to yesterday's sleep (sleep records often land the next day)
-    if not sleep:
-        sleep = _query("SELECT * FROM sleeps ORDER BY date DESC LIMIT 1")
-    sleep = sleep[0] if sleep else {}
+    if not sleep_rows:
+        sleep_rows = _query("SELECT * FROM sleeps ORDER BY date DESC LIMIT 1")
+    sleep = {**SLEEP_DEFAULTS, **(sleep_rows[0] if sleep_rows else {})}
 
-    cycle = _query(
+    cycle_rows = _query(
         "SELECT * FROM cycles WHERE date = ? ORDER BY rowid DESC LIMIT 1", (today,)
     )
-    if not cycle:
-        cycle = _query("SELECT * FROM cycles ORDER BY date DESC LIMIT 1")
-    cycle = cycle[0] if cycle else {}
+    if not cycle_rows:
+        cycle_rows = _query("SELECT * FROM cycles ORDER BY date DESC LIMIT 1")
+    cycle = {**CYCLE_DEFAULTS, **(cycle_rows[0] if cycle_rows else {})}
 
-    # 30-day trend data for charts
     recoveries_30 = _query(
         "SELECT date, score, hrv_rmssd_milli, resting_heart_rate FROM recoveries ORDER BY date DESC LIMIT 30"
     )
@@ -53,14 +109,8 @@ async def dashboard(request: Request):
         "SELECT date, strain_score FROM cycles ORDER BY date DESC LIMIT 30"
     )
 
-    # Mood logs (last 7)
-    mood_logs = _query(
-        "SELECT * FROM mood_logs ORDER BY created_at DESC LIMIT 7"
-    )
-
-    # Calendar events
+    mood_logs = _query("SELECT * FROM mood_logs ORDER BY created_at DESC LIMIT 7")
     calendar_events = fetch_today_events()
-
     last_sync = get_sync_state("last_sync_at")
 
     return templates.TemplateResponse("index.html", {
