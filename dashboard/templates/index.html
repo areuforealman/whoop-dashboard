@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Whoop Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0f18;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      padding: 24px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; color: #f1f5f9; }
+    header .meta { color: #64748b; font-size: 12px; }
+
+    .sync-btn {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background 0.15s;
+    }
+    .sync-btn:hover { background: #334155; color: #e2e8f0; }
+
+    /* Today strip */
+    .today-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .metric-card {
+      background: #1a1f2e;
+      border-radius: 10px;
+      padding: 18px;
+      text-align: center;
+    }
+    .metric-card .label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #64748b;
+      margin-bottom: 8px;
+    }
+    .metric-card .value {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .metric-card .sub { font-size: 11px; color: #64748b; margin-top: 4px; }
+
+    .green  { color: #4ade80; }
+    .yellow { color: #f59e0b; }
+    .red    { color: #f87171; }
+    .blue   { color: #60a5fa; }
+    .purple { color: #c084fc; }
+
+    /* Charts grid */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .chart-card {
+      background: #1a1f2e;
+      border-radius: 10px;
+      padding: 18px;
+    }
+    .chart-card h3 {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #64748b;
+      margin-bottom: 14px;
+    }
+    .chart-card canvas { width: 100% !important; }
+
+    /* Bottom panels */
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .panel {
+      background: #1a1f2e;
+      border-radius: 10px;
+      padding: 18px;
+    }
+    .panel h3 {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #64748b;
+      margin-bottom: 14px;
+    }
+
+    /* Calendar */
+    .event-item {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 8px 0;
+      border-bottom: 1px solid #1e293b;
+    }
+    .event-item:last-child { border-bottom: none; }
+    .event-time { color: #60a5fa; font-size: 12px; min-width: 50px; }
+    .event-title { color: #cbd5e1; font-size: 13px; }
+    .no-events { color: #475569; font-size: 13px; }
+
+    /* Mood log */
+    .mood-form { margin-bottom: 16px; }
+    .mood-form label { display: block; color: #94a3b8; font-size: 12px; margin-bottom: 6px; }
+    .energy-slider {
+      width: 100%;
+      accent-color: #4ade80;
+      margin-bottom: 10px;
+    }
+    .mood-form textarea {
+      width: 100%;
+      background: #0d0f18;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 13px;
+      padding: 8px;
+      resize: none;
+      height: 60px;
+      margin-bottom: 8px;
+    }
+    .mood-form textarea:focus { outline: none; border-color: #4ade80; }
+    .submit-btn {
+      background: #166534;
+      border: none;
+      color: #4ade80;
+      padding: 7px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .submit-btn:hover { background: #15803d; }
+
+    .mood-log-item {
+      padding: 8px 0;
+      border-bottom: 1px solid #1e293b;
+      font-size: 12px;
+    }
+    .mood-log-item:last-child { border-bottom: none; }
+    .mood-log-item .mood-meta { color: #475569; margin-bottom: 2px; }
+    .mood-log-item .mood-note { color: #94a3b8; }
+
+    .energy-dots { display: inline-flex; gap: 3px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #1e293b; }
+    .dot.filled { background: #4ade80; }
+
+    .success-msg { color: #4ade80; font-size: 12px; margin-top: 6px; display: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Whoop Dashboard</h1>
+    <div class="meta">
+      {{ today }} &nbsp;·&nbsp;
+      {% if last_sync %}Last sync: {{ last_sync[:16].replace("T"," ") }}{% else %}Not synced yet{% endif %}
+    </div>
+  </div>
+  <button class="sync-btn" onclick="triggerSync(this)">↻ Sync now</button>
+</header>
+
+<!-- Today strip -->
+<div class="today-strip">
+  <div class="metric-card">
+    <div class="label">Recovery</div>
+    {% if recovery.score is not none %}
+      {% if recovery.score >= 67 %}
+        <div class="value green">{{ recovery.score }}%</div>
+      {% elif recovery.score >= 34 %}
+        <div class="value yellow">{{ recovery.score }}%</div>
+      {% else %}
+        <div class="value red">{{ recovery.score }}%</div>
+      {% endif %}
+      <div class="sub">
+        {% if recovery.score >= 67 %}Green — good to push{% elif recovery.score >= 34 %}Yellow — moderate effort{% else %}Red — rest up{% endif %}
+      </div>
+    {% else %}
+      <div class="value" style="color:#475569">—</div>
+      <div class="sub">No data today</div>
+    {% endif %}
+  </div>
+
+  <div class="metric-card">
+    <div class="label">HRV</div>
+    {% if recovery.hrv_rmssd_milli %}
+      <div class="value purple">{{ "%.0f"|format(recovery.hrv_rmssd_milli) }}<span style="font-size:14px;font-weight:400"> ms</span></div>
+    {% else %}
+      <div class="value" style="color:#475569">—</div>
+    {% endif %}
+    <div class="sub">Resting HR: {% if recovery.resting_heart_rate %}{{ recovery.resting_heart_rate }} bpm{% else %}—{% endif %}</div>
+  </div>
+
+  <div class="metric-card">
+    <div class="label">Sleep</div>
+    {% if sleep.total_sleep_time_milli %}
+      {% set hrs = (sleep.total_sleep_time_milli / 3600000) | int %}
+      {% set mins = ((sleep.total_sleep_time_milli % 3600000) / 60000) | int %}
+      <div class="value blue">{{ hrs }}h {{ mins }}m</div>
+      <div class="sub">
+        {% if sleep.sleep_efficiency_percentage %}{{ "%.0f"|format(sleep.sleep_efficiency_percentage) }}% efficiency{% endif %}
+      </div>
+    {% else %}
+      <div class="value" style="color:#475569">—</div>
+      <div class="sub">No sleep data</div>
+    {% endif %}
+  </div>
+
+  <div class="metric-card">
+    <div class="label">Day Strain</div>
+    {% if cycle.strain_score %}
+      {% if cycle.strain_score >= 18 %}
+        <div class="value red">{{ "%.1f"|format(cycle.strain_score) }}</div>
+      {% elif cycle.strain_score >= 10 %}
+        <div class="value yellow">{{ "%.1f"|format(cycle.strain_score) }}</div>
+      {% else %}
+        <div class="value green">{{ "%.1f"|format(cycle.strain_score) }}</div>
+      {% endif %}
+      <div class="sub">{% if cycle.strain_score >= 18 %}All out{% elif cycle.strain_score >= 14 %}Hard{% elif cycle.strain_score >= 10 %}Moderate{% else %}Light{% endif %}</div>
+    {% else %}
+      <div class="value" style="color:#475569">—</div>
+      <div class="sub">Building today</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="charts-grid">
+  <div class="chart-card">
+    <h3>Recovery — 30 days</h3>
+    <canvas id="recoveryChart" height="140"></canvas>
+  </div>
+  <div class="chart-card">
+    <h3>HRV — 30 days</h3>
+    <canvas id="hrvChart" height="140"></canvas>
+  </div>
+  <div class="chart-card">
+    <h3>Sleep duration — 30 days</h3>
+    <canvas id="sleepChart" height="140"></canvas>
+  </div>
+  <div class="chart-card">
+    <h3>Day strain — 30 days</h3>
+    <canvas id="strainChart" height="140"></canvas>
+  </div>
+</div>
+
+<!-- Calendar + Mood -->
+<div class="bottom-grid">
+  <div class="panel">
+    <h3>Today's calendar</h3>
+    {% if calendar_events %}
+      {% for event in calendar_events %}
+        <div class="event-item">
+          <div class="event-time">
+            {% if "T" in event.start %}
+              {{ event.start[11:16] }}
+            {% else %}
+              All day
+            {% endif %}
+          </div>
+          <div class="event-title">{{ event.title }}</div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="no-events">No events today</div>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h3>Mood &amp; energy</h3>
+    <div class="mood-form">
+      <label>Energy level: <strong id="energyVal">3</strong>/5</label>
+      <input type="range" class="energy-slider" min="1" max="5" value="3" id="energySlider"
+             oninput="document.getElementById('energyVal').textContent=this.value">
+      <textarea id="moodNote" placeholder="Optional note — how are you feeling?"></textarea>
+      <button class="submit-btn" onclick="submitMood()">Log mood</button>
+      <div class="success-msg" id="moodSuccess">✓ Logged</div>
+    </div>
+
+    {% if mood_logs %}
+      {% for log in mood_logs %}
+        <div class="mood-log-item">
+          <div class="mood-meta">
+            {{ log.date }} &nbsp;
+            <span class="energy-dots">
+              {% for i in range(1, 6) %}
+                <span class="dot {% if i <= log.energy_level %}filled{% endif %}"></span>
+              {% endfor %}
+            </span>
+          </div>
+          {% if log.note %}<div class="mood-note">{{ log.note }}</div>{% endif %}
+        </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  const chartDefaults = {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: "#475569", font: { size: 10 }, maxTicksLimit: 6 }, grid: { color: "#1e293b" } },
+      y: { ticks: { color: "#475569", font: { size: 10 } }, grid: { color: "#1e293b" } },
+    },
+  };
+
+  function makeChart(id, labels, data, color, yLabel) {
+    new Chart(document.getElementById(id), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          data,
+          borderColor: color,
+          backgroundColor: color + "18",
+          borderWidth: 2,
+          pointRadius: 2,
+          pointHoverRadius: 4,
+          fill: true,
+          tension: 0.3,
+        }],
+      },
+      options: { ...chartDefaults },
+    });
+  }
+
+  // Recovery chart
+  const recLabels = {{ recoveries_30 | map(attribute="date") | list | tojson }};
+  const recData   = {{ recoveries_30 | map(attribute="score") | list | tojson }};
+  makeChart("recoveryChart", recLabels, recData, "#4ade80");
+
+  // HRV chart
+  const hrvData = {{ recoveries_30 | map(attribute="hrv_rmssd_milli") | list | tojson }};
+  makeChart("hrvChart", recLabels, hrvData, "#c084fc");
+
+  // Sleep chart (hours)
+  const sleepLabels = {{ sleeps_30 | map(attribute="date") | list | tojson }};
+  const sleepData   = {{ sleeps_30 | map(attribute="total_sleep_time_milli") | list | tojson }}
+                      .map(v => v ? +(v / 3600000).toFixed(1) : null);
+  makeChart("sleepChart", sleepLabels, sleepData, "#60a5fa");
+
+  // Strain chart
+  const strainLabels = {{ strains_30 | map(attribute="date") | list | tojson }};
+  const strainData   = {{ strains_30 | map(attribute="strain_score") | list | tojson }};
+  makeChart("strainChart", strainLabels, strainData, "#f59e0b");
+
+  // Mood submit
+  async function submitMood() {
+    const energy = document.getElementById("energySlider").value;
+    const note = document.getElementById("moodNote").value;
+    const form = new FormData();
+    form.append("energy_level", energy);
+    form.append("note", note);
+    const res = await fetch("/mood", { method: "POST", body: form });
+    if (res.ok) {
+      document.getElementById("moodSuccess").style.display = "block";
+      document.getElementById("moodNote").value = "";
+      setTimeout(() => location.reload(), 800);
+    }
+  }
+
+  // Sync
+  async function triggerSync(btn) {
+    btn.textContent = "Syncing...";
+    btn.disabled = true;
+    const res = await fetch("/sync", { method: "POST" });
+    if (res.ok) {
+      location.reload();
+    } else {
+      btn.textContent = "↻ Sync now";
+      btn.disabled = false;
+      alert("Sync failed — check terminal for errors.");
+    }
+  }
+</script>
+</body>
+</html>

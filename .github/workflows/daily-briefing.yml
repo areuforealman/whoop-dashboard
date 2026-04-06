@@ -1,0 +1,29 @@
+name: Daily Whoop Briefing
+
+on:
+  schedule:
+    - cron: "0 7 * * *"   # 7:00 AM UTC — adjust to your timezone
+  workflow_dispatch:        # manual trigger for testing
+
+jobs:
+  send-briefing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send briefing
+        run: python briefing/send_briefing.py
+        env:
+          WHOOP_CLIENT_ID: ${{ secrets.WHOOP_CLIENT_ID }}
+          WHOOP_CLIENT_SECRET: ${{ secrets.WHOOP_CLIENT_SECRET }}
+          WHOOP_REFRESH_TOKEN: ${{ secrets.WHOOP_REFRESH_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GCAL_CREDENTIALS: ${{ secrets.GCAL_CREDENTIALS }}
