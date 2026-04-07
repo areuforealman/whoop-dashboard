@@ -69,15 +69,14 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {token['access_token']}"}
 
 
-def _paginate(path: str, params: Optional[dict] = None, stop_before: Optional[str] = None) -> list:
-    """Fetch pages, stopping client-side when records are older than stop_before."""
+def _paginate(path: str, params: Optional[dict] = None, max_pages: int = 4) -> list:
+    """Fetch up to max_pages pages from a Whoop endpoint."""
     results = []
     url = f"{WHOOP_API_BASE}{path}"
     p = {"limit": 25}
     if params:
         p.update(params)
-    page = 1
-    while url:
+    for page in range(1, max_pages + 1):
         for attempt in range(5):
             try:
                 resp = requests.get(url, headers=_headers(), params=p, timeout=15)
@@ -94,35 +93,14 @@ def _paginate(path: str, params: Optional[dict] = None, stop_before: Optional[st
             break
         data = resp.json()
         batch = data.get("records", [])
-        if not batch:
-            break
-        # Client-side date filter — stop when records pass our cutoff
-        if stop_before:
-            filtered = [r for r in batch if _record_date(r) >= stop_before]
-            results.extend(filtered)
-            print(f"  {path} page {page}: {len(filtered)}/{len(batch)} records kept (total {len(results)})")
-            if len(filtered) < len(batch):
-                break  # hit records older than cutoff
-        else:
-            results.extend(batch)
-            print(f"  {path} page {page}: {len(batch)} records (total {len(results)})")
+        results.extend(batch)
+        print(f"  {path} page {page}: {len(batch)} records (total {len(results)})")
         next_token = data.get("next_token")
-        if next_token:
-            p = {"next_token": next_token, "limit": 25}
-            page += 1
-        else:
+        if not next_token or not batch:
             break
+        p = {"next_token": next_token, "limit": 25}
         time.sleep(0.3)
     return results
-
-
-def _record_date(record: dict) -> str:
-    """Extract a comparable date string from any Whoop record type."""
-    for field in ("start", "updated_at", "created_at"):
-        val = record.get(field)
-        if val:
-            return val[:10]
-    return "9999-12-31"
 
 
 def _date_param(days_ago: int) -> str:
@@ -133,8 +111,7 @@ def _date_param(days_ago: int) -> str:
 # --- Public fetch functions ---
 
 def fetch_cycles(start: Optional[str] = None) -> list[dict]:
-    cutoff = start or _date_param(90)
-    raw = _paginate("/cycle", {"start": cutoff}, stop_before=cutoff[:10])
+    raw = _paginate("/cycle", max_pages=4)
     results = []
     for r in raw:
         score = r.get("score") or {}
@@ -148,8 +125,7 @@ def fetch_cycles(start: Optional[str] = None) -> list[dict]:
 
 
 def fetch_recoveries(start: Optional[str] = None) -> list[dict]:
-    cutoff = start or _date_param(90)
-    raw = _paginate("/recovery", {"start": cutoff}, stop_before=cutoff[:10])
+    raw = _paginate("/recovery", max_pages=4)
     results = []
     for r in raw:
         score = r.get("score") or {}
@@ -166,8 +142,7 @@ def fetch_recoveries(start: Optional[str] = None) -> list[dict]:
 
 
 def fetch_sleeps(start: Optional[str] = None) -> list[dict]:
-    cutoff = start or _date_param(90)
-    raw = _paginate("/activity/sleep", {"start": cutoff}, stop_before=cutoff[:10])
+    raw = _paginate("/activity/sleep", max_pages=4)
     results = []
     for r in raw:
         score = r.get("score") or {}
@@ -186,8 +161,7 @@ def fetch_sleeps(start: Optional[str] = None) -> list[dict]:
 
 
 def fetch_workouts(start: Optional[str] = None) -> list[dict]:
-    cutoff = start or _date_param(90)
-    raw = _paginate("/activity/workout", {"start": cutoff}, stop_before=cutoff[:10])
+    raw = _paginate("/activity/workout", max_pages=4)
     results = []
     for r in raw:
         score = r.get("score") or {}
