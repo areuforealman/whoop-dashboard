@@ -75,24 +75,33 @@ def _paginate(path: str, params: Optional[dict] = None) -> list:
     url = f"{WHOOP_API_BASE}{path}"
     p = dict(params or {})
     p["limit"] = 25
+    page = 1
     while url:
         for attempt in range(5):
-            resp = requests.get(url, headers=_headers(), params=p)
+            try:
+                resp = requests.get(url, headers=_headers(), params=p, timeout=15)
+            except requests.exceptions.Timeout:
+                print(f"Timeout on {path} page {page}, retrying...")
+                time.sleep(2)
+                continue
             if resp.status_code == 429:
-                wait = int(resp.headers.get("Retry-After", 2 ** (attempt + 1)))
-                print(f"Rate limited — waiting {wait}s before retry...")
+                wait = min(int(resp.headers.get("Retry-After", 2 ** (attempt + 1))), 10)
+                print(f"Rate limited — waiting {wait}s...")
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
             break
         data = resp.json()
-        results.extend(data.get("records", []))
+        batch = data.get("records", [])
+        results.extend(batch)
+        print(f"  {path} page {page}: {len(batch)} records (total {len(results)})")
         next_token = data.get("next_token")
         if next_token:
             p = {"next_token": next_token, "limit": 25}
+            page += 1
         else:
             url = None
-        time.sleep(0.5)  # small delay between pages to avoid rate limits
+        time.sleep(0.3)
     return results
 
 
