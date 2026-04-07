@@ -142,10 +142,10 @@ async def log_mood(energy_level: int = Form(...), note: str = Form("")):
 def _start_sync_thread():
     if _sync_status["running"]:
         return
+    _sync_status["running"] = True
+    _sync_status["message"] = "Syncing..."
     def _run():
         from sync.sync import run_sync
-        _sync_status["running"] = True
-        _sync_status["message"] = "Syncing..."
         try:
             run_sync()
             _sync_status["message"] = "Sync complete"
