@@ -97,7 +97,7 @@ def _paginate(path: str, params: Optional[dict] = None) -> list:
         print(f"  {path} page {page}: {len(batch)} records (total {len(results)})")
         next_token = data.get("next_token")
         if next_token:
-            p = {"next_token": next_token, "limit": 25}
+            p["next_token"] = next_token  # keep existing params (including start date)
             page += 1
         else:
             url = None
